@@ -59725,8 +59725,8 @@ function pickDayPlan(i){
 const PVP_FB="https://kleagueonline-default-rtdb.asia-southeast1.firebasedatabase.app/";
 const PVP_VER=2;                 // 프로토콜 버전 — 다르면 매칭을 거절한다 (v2: 매치엔진 화면 동일화 — 스냅샷에 소유자·전후반·HL 탑재)
 const PVP_STUN=[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}];
-const PVP_SNAP_MS=50;            // 상태 스냅샷 전송 간격 (20Hz)
-const PVP_PLAYOUT=130;           // 게스트 재생 지연(ms) — 이만큼 과거를 그려 지터를 흡수한다 (제보: 뚝뚝 끊김)
+const PVP_SNAP_MS=33;            // 상태 스냅샷 전송 간격 (30Hz — 제보: 프레임 동일화)
+const PVP_PLAYOUT=100;           // 게스트 재생 지연(ms) — 표본 3장 분량, 지터를 흡수한다 (제보: 뚝뚝 끊김)
 const PVP_QUEUE_TTL=90;          // 대기열 항목 유효 시간(초)
 const PVP_STAR_GAP=10;           // 빠른 대전 허용 전력차 (별점×10 기준 — 1.0성)
 let PVP=null;                    // 진행 중인 대전 상태
@@ -60186,7 +60186,8 @@ function pvpOnMsg(raw){
     const el=document.getElementById("pvpCap");
     if(el){ el.textContent=m.x||"";
       const i=PVP.watch.info||{};
-      el.style.borderLeftColor = m.s==="h" ? (i.hc||"#2ea8ff") : m.s==="a" ? (i.ac||"#f85149") : "#8b949e"; } } }catch(e){} return; }
+      const col = m.s==="h" ? (i.hc||"#2ea8ff") : m.s==="a" ? (i.ac||"#f85149") : "#1b2129";
+      try{ setCssVar(el, "--cbar", col); }catch(e){ el.style.borderLeftColor=col; } } } }catch(e){} return; }
   if(m.t==="bye"){
     /* ⚠ 제보(몰수) — 경기 중 기권 통보면 3:0 몰수승으로 받는다 */
     if(PVP.stage==="match" && pvpForfeitWin("상대가 기권했습니다")) return;
@@ -60277,12 +60278,21 @@ function pvpOnSnap(buf){
     const wb=(PVP.watch.buf=PVP.watch.buf||[]);
     wb.push({s, at:PVP.watch.at});
     if(wb.length>40) wb.splice(0, wb.length-40);
-    /* 전광판 — 매 스냅샷마다 DOM 을 만지면 아깝다. 0.25초에 한 번 */
+    /* 전광판 — 매 스냅샷마다 DOM 을 만지면 아깝다. 0.25초에 한 번 (호스트 lvHead 와 같은 구성) */
     const now=Date.now();
     if(!PVP.watch._sbAt || now-PVP.watch._sbAt>250){
       PVP.watch._sbAt=now;
-      const el=document.getElementById("pvpScore");
-      if(el){ const h=pvpScoreHtml(); if(el._last!==h){ el._last=h; el.innerHTML=h; } }
+      try{
+        const sc=document.getElementById("pvpScoreN");
+        if(sc){ const t=(s.hg||0)+" : "+(s.ag||0); if(sc.textContent!==t) sc.textContent=t; }
+        const mn=document.getElementById("pvpMin");
+        if(mn){ const mm=Math.floor((s.clock||0)/60);
+          const t=mm+"'"+(s.et?(mm>105?" 연장 후반":" 연장 전반"):(s.half2?" 후반":" 전반"));
+          if(mn.textContent!==t) mn.textContent=t; }
+        const md=document.getElementById("pvpMode");
+        if(md){ const t=s.hl?"● HIGHLIGHT":"○ 경기 진행 중";
+          if(md.textContent!==t){ md.textContent=t; md.style.color=s.hl?"#f85149":""; } }
+      }catch(e){}
     }
   }catch(e){}
 }
@@ -60292,7 +60302,7 @@ function pvpGuestEv(m){
   W.evs.unshift(m); if(W.evs.length>60) W.evs.length=60;
   W.hg=m.hg; W.ag=m.ag;
   try{ const el=document.getElementById("pvpEvs"); if(el) el.innerHTML=pvpEvHtml(); }catch(e){}
-  try{ const sc=document.getElementById("pvpScore"); if(sc) sc.innerHTML=pvpScoreHtml(); }catch(e){}
+  try{ const sc=document.getElementById("pvpScoreN"); if(sc) sc.textContent=(W.hg||0)+" : "+(W.ag||0); }catch(e){}
 }
 function pvpStatsHtml(){
   const W=PVP&&PVP.watch; const st=(W&&W.st)||null; const i=(W&&W.info)||{};
@@ -60361,14 +60371,16 @@ function pvpDrawWatch(){
     const q=find(A0,a);
     const key=a.side+String(a.no);
     const jump=q && Math.hypot(a.x-q.x, a.y-q.y)>JUMP;
+    /* 방향 삼각형도 보간 — 표본 리듬 그대로 두면 화살표가 틱틱 돈다 (lerpAngle: 각도 순환 처리) */
+    const fc=(q&&!jump&&typeof lerpAngle==="function")?lerpAngle(q.face, a.face, k):a.face;
     fs.agents.push({ id:key, side:a.side, slot:(W.gkNos[a.side]&&W.gkNos[a.side][a.no])?"GK":"",
       x:(q&&!jump?lerpA(q.x,a.x):a.x), y:(q&&!jump?lerpA(q.y,a.y):a.y),
-      face:a.face, _rf:a.face, p:{no:a.no} });
+      face:fc, _rf:fc, p:{no:a.no} });
   }
   const bJump=Math.hypot(A1.ball.x-A0.ball.x, A1.ball.y-A0.ball.y)>JUMP;
   fs.ball.x=bJump?A1.ball.x:lerpA(A0.ball.x,A1.ball.x);
   fs.ball.y=bJump?A1.ball.y:lerpA(A0.ball.y,A1.ball.y);
-  fs.ball.z=A1.ball.z||0;
+  fs.ball.z=bJump?(A1.ball.z||0):lerpA(A0.ball.z||0, A1.ball.z||0);   // 공중볼 궤적도 매끈하게
   fs.ball.ownerId = A1.own ? (A1.own.side+String(A1.own.no)) : null;
   try{ drawSimWatch(cv, fs); }catch(e){}
   /* 하이라이트 사이(빨리 감기 중)에는 호스트처럼 화면을 어둡게 — 장면이 시작되면 밝아진다 */
@@ -60561,6 +60573,7 @@ function pvpLeave(){
 /* ── 화면 ────────────────────────────────────────────────────────────── */
 function pvpStars10(v){ return (Math.round(v)/10).toFixed(1); }
 function pvpView(){
+  try{ if(!(PVP && PVP.stage==="match" && PVP.role==="guest")) document.body.classList.remove("matchFS"); }catch(e){}
   const logHtml=(function(){
     const L=G.pvpLog||[];
     const w=L.filter(x=>x.my>x.op).length, d=L.filter(x=>x.my===x.op).length, l=L.filter(x=>x.my<x.op).length;
@@ -60631,20 +60644,34 @@ function pvpView(){
   }
   if(PVP.stage==="match" && PVP.role==="guest"){
     const W=PVP.watch||{}, i=W.info||{};
-
-    return `<h2>⚔️ ${i.hn||"홈"} vs ${i.an||"원정"} <span class="small">— 원격 관전 (원정)</span></h2>
-    <div class="card"><div id="pvpScore" style="margin-bottom:8px;display:flex;align-items:center;flex-wrap:wrap;gap:2px">${pvpScoreHtml()}</div>
-      <canvas id="pvpCv" width="960" height="630" style="width:100%;max-width:960px;border-radius:8px"></canvas>
-      <div id="pvpCap" style="margin-top:6px;max-width:680px;padding:8px 10px;background:#10151c;border-left:3px solid ${(W.cap&&W.cap.s==="h")?(i.hc||"#2ea8ff"):(W.cap&&W.cap.s==="a")?(i.ac||"#f85149"):"#8b949e"};border-radius:6px;min-height:19px;font-size:13px">${(W.cap&&W.cap.x)||"📡 중계 연결됨 — 해설이 곧 시작됩니다"}</div></div>
-    <div class="row">
-      <div class="card" style="flex:1;min-width:220px"><h3>📊 경기 통계</h3><div id="pvpStats">${pvpStatsHtml()}</div></div>
-      <div class="card" style="flex:1;min-width:260px"><h3>🎛️ 실시간 지시 <span class="small">— 즉시 반영</span></h3>
-        <div id="pvpGuestSliders">${pvpGuestSlidersHtml()}</div>
-        <p class="small" style="opacity:.7;margin-top:6px">교체는 양 팀 모두 수석코치가 자동으로 합니다 (v1)</p></div>
-      <div class="card" style="flex:1;min-width:260px"><h3>📻 중계</h3><div id="pvpEvs" style="max-height:38vh;overflow-y:auto">${pvpEvHtml()}</div></div>
-      <div class="card" style="flex:1;min-width:240px"><h3>💬 채팅</h3>${pvpChatBox(0)}</div>
+    const sN=W.snap||{};
+    const hc=i.hc||"#2ea8ff", ac=i.ac||"#f85149";
+    try{ document.body.classList.add("matchFS"); }catch(e){}
+    return `<div class="lvGrid">
+    <div class="lvCenter card">
+      <div class="lvHead">
+        <span class="t" style="background:${hc};color:${inkOn(hc)}">${i.hs||"홈"}</span>
+        <span id="pvpScoreN">${W.hg||0} : ${W.ag||0}</span>
+        <span class="t" style="background:${ac};color:${inkOn(ac)}">${i.as||"원정"}</span>
+        <span id="pvpMin">${Math.floor((W.clock||0)/60)}'${sN.et?" 연장":(sN.half2?" 후반":" 전반")}</span>
+        <span style="display:flex;gap:5px;align-items:center"><button class="mini" onclick="pvpLeave()" title="경기 중 이탈은 0:3 몰수패입니다">🚪 기권</button></span>
+        <span id="pvpMode" class="pitchMode" style="margin-left:auto${sN.hl?";color:#f85149":""}">${sN.hl?"● HIGHLIGHT":"○ 경기 진행 중"}</span>
+      </div>
+      <div class="pitchWrap">
+        <canvas id="pvpCv" width="960" height="630"></canvas>
+      </div>
+      <div id="pvpCap" class="pitchCaption">${(W.cap&&W.cap.x)||"📡 중계 연결됨 — 해설이 곧 시작됩니다"}</div>
+      <div class="small" style="text-align:left; margin-top:6px; color:var(--sub)">2D 매치엔진 2.0 by 청백적시메오네 — ⚔️ 원격 관전 (원정)</div>
     </div>
-    <button class="mini" style="margin-top:8px" onclick="pvpLeave()">🚪 기권하고 나가기</button>`;
+    <div class="lvSide">
+      <div class="card"><h3>📊 경기 통계</h3><div id="pvpStats">${pvpStatsHtml()}</div></div>
+      <div class="card"><h3>📋 실시간 지시 <span class="small">— 즉시 반영</span></h3>
+        <div id="pvpGuestSliders">${pvpGuestSlidersHtml()}</div>
+        <p class="small" style="opacity:.7;margin-top:6px">교체는 양 팀 모두 수석코치 자동 (양 팀 동일)</p>
+        ${pvpChatBox(1)}</div>
+      <div class="card"><h3>📻 중계</h3><div id="pvpEvs" style="max-height:26vh;overflow-y:auto">${pvpEvHtml()}</div></div>
+    </div>
+  </div>`;
   }
   if(PVP.stage==="done"){
     const r=PVP.result||{hg:0,ag:0};
