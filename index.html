@@ -57486,7 +57486,18 @@ function liveTick(){
   if(!liveM||livePaused) return;
   // HIGHLIGHT_MODE(2D 연출 중)에는 경기 시계를 멈춘다 — 장면이 다 끝나고 TEXT_MODE로 돌아와야 다음 분으로
   // 넘어간다. 그래야 "전반 종료·후반전 시작"같은 경기 상태가 화면에 나오는 장면보다 앞서가지 않는다.
-  if(matchMode===MATCH_MODE.HIGHLIGHT || revealQueue.length || revealTimer || current2DScene) return;
+  if(matchMode===MATCH_MODE.HIGHLIGHT || revealQueue.length || revealTimer || current2DScene){
+    /* ⚠ PvP — 호스트 탭이 백그라운드면 rAF 가 죽어 하이라이트가 영영 안 끝난다.
+       상대가 실시간으로 기다린다 — 여기서 장면을 밀어 준다 (stepLiveSim 안전망과 동일 수법). */
+    if(liveM.opts && liveM.opts.pvp && document.hidden && typeof liveHL!=="undefined" && liveHL){
+      try{
+        const t=nowMs();
+        if(liveHL.lastAdv && t-liveHL.lastAdv>400) advanceHighlight((t-liveHL.lastAdv)/1000);
+        else if(!liveHL.lastAdv) liveHL.lastAdv=t;
+      }catch(e){}
+    }
+    return;
+  }
   // 이전 틱에서 하프타임이 우선 처리되어 미뤄진 부상/퇴장 알림이 있으면, 다음 분으로 넘어가기 전에 먼저 처리
   // (재생 중인 장면이 있으면 그게 끝난 뒤에 — 퇴장 장면보다 전술창이 먼저 뜨지 않게)
   if(liveM.needsSubPause && !liveHL){ liveM.needsSubPause=false;
@@ -57549,7 +57560,10 @@ function stepLiveSim(){
   //   ⚠ "몇 분치"로 끊으면 안 된다. 1분 = 300틱이고 틱마다 22명을 굴리므로,
   //      3분치를 한 번에 돌리면 메인 스레드가 수백 ms 멈춰 화면이 뚝뚝 끊긴다.
   //      대신 "이번 호출에 쓸 시간"을 정해 두고 그만큼만 굴린다 — 기기가 느려도 화면은 부드럽다.
-  const t0=nowMs(), budget=Math.min(22, 6*liveMul());
+  /* ⚠ PvP — 백그라운드 탭은 타이머가 초당 1회로 묶인다(크롬 스로틀). 호출 횟수가 30분의 1로
+     줄어든 만큼 호출당 예산을 키워, 호스트가 탭을 벗어나도 상대의 경기가 실시간으로 흐르게 한다. */
+  const _pvpBg = !!(liveM && liveM.opts && liveM.opts.pvp && document.hidden);
+  const t0=nowMs(), budget=_pvpBg ? 180 : Math.min(22, 6*liveMul());
   let guard=0;
   /* ⚠ 제보 — 전반 45분에 PK를 얻으면 휘슬이 울리고 후반에 차는 버그.
      실제 규정처럼, 진행 중인 반칙 장면·PK·날아가는 슛·세리머니가 있으면 그게 끝날 때까지
@@ -59835,6 +59849,7 @@ function pvpReset(keepLog){
   try{ if(PVP&&PVP.esQ) PVP.esQ.close(); }catch(e){}
   try{ if(PVP&&PVP.pc) PVP.pc.close(); }catch(e){}
   try{ if(PVP&&PVP.snapT) clearInterval(PVP.snapT); }catch(e){}
+  try{ if(PVP&&PVP.helloT) clearInterval(PVP.helloT); }catch(e){}
   try{ if(PVP&&PVP.qEntry) fbDel("queue/"+PVP.qEntry); }catch(e){}
   try{ if(PVP&&PVP.room&&PVP.role==="host"&&PVP.stage!=="match") fbDel("rooms/"+PVP.room); }catch(e){}
   PVP=null;
@@ -59941,15 +59956,31 @@ function pvpRtcBase(){
   pc.onconnectionstatechange=()=>{
     if(!PVP) return;
     const s=pc.connectionState;
-    if(s==="connected" && PVP.stage!=="match"){ PVP.stage="lobby"; pvpSt("연결됐습니다 — 스쿼드를 교환하는 중…"); pvpSendHello(); }
+    if(s==="connected" && PVP.stage!=="match"){ PVP.stage="lobby"; pvpSt("연결됐습니다 — 스쿼드를 교환하는 중…"); pvpHelloSync(); }
     if(s==="failed"||s==="disconnected"||s==="closed") pvpDropped();
   };
   return pc;
 }
 function pvpBindCh(ch, kind){
   ch.binaryType="arraybuffer";
-  if(kind==="r"){ PVP.chR=ch; ch.onmessage=(e)=>pvpOnMsg(e.data); }
+  if(kind==="r"){ PVP.chR=ch; ch.onmessage=(e)=>pvpOnMsg(e.data);
+    /* ⚠ 제보(스쿼드 교환 멈춤) — 전송은 채널이 「열린 뒤」에. 이미 열려 있으면 즉시. */
+    ch.onopen=()=>{ try{ pvpHelloSync(); }catch(e){} };
+    if(ch.readyState==="open"){ try{ pvpHelloSync(); }catch(e){} }
+  }
   else { PVP.chU=ch; ch.onmessage=(e)=>pvpOnSnap(e.data); }
+}
+/* hello 재전송 — 상대 스쿼드가 도착할 때까지 0.9초 간격, 12회 넘으면 포기 안내 */
+function pvpHelloSync(){
+  if(!PVP || PVP.helloT) return;
+  pvpSendHello();
+  PVP.helloTries=0;
+  PVP.helloT=setInterval(()=>{
+    if(!PVP){ return; }
+    if(PVP.oppPack || PVP.stage==="match" || PVP.stage==="done"){ clearInterval(PVP.helloT); PVP.helloT=null; return; }
+    if(++PVP.helloTries>12){ clearInterval(PVP.helloT); PVP.helloT=null; pvpAbort("스쿼드 교환에 실패했습니다 — 다시 시도해 주세요."); return; }
+    pvpSendHello();
+  }, 900);
 }
 async function pvpRtcStart(){       // 게스트: 채널 생성 + offer
   const pc=pvpRtcBase();
@@ -59978,8 +60009,12 @@ function pvpOnMsg(raw){
   if(!PVP||!m||!m.t) return;
   if(m.t==="hello"){
     if((m.ver||0)!==PVP_VER){ pvpSend({t:"bye", why:"ver"}); pvpAbort("상대와 게임 버전이 다릅니다."); return; }
+    const first=!PVP.oppPack;
     PVP.oppPack=m.pack; PVP.oppCheck=pvpPackCheck(m.pack||{});
-    PVP.stage="lobby";
+    if(PVP.helloT){ try{ clearInterval(PVP.helloT); }catch(e){} PVP.helloT=null; }
+    /* 재전송으로 뒤늦게 온 hello 가 경기 중 화면을 로비로 되돌리지 않게 한다 */
+    if(PVP.stage!=="match" && PVP.stage!=="done") PVP.stage="lobby";
+    if(first) pvpSendHello();   // 상대가 내 것을 못 받았을 수 있다 — 한 번 되보낸다 (서로 1회로 수렴)
     pvpSt(null);
     return;
   }
