@@ -208,7 +208,7 @@ select,input[type=number]{background:var(--bg3); color:var(--txt); border:1px so
 @keyframes goalflash{0%{color:#fff}50%{color:var(--gold);text-shadow:0 0 18px #e3b341}100%{color:#fff}}
 .lvMin{font-size:15px; color:var(--gold); font-weight:700; margin-top:6px;}
 /* 2D 매치엔진 (바둑알 시각화) */
-#pitch2d{width:100%; height:auto; display:block; border-radius:8px; border:1px solid var(--line); background:#143a24; transition:opacity .22s, filter .22s;}
+#pitch2d,#pvpCv{width:100%; height:auto; display:block; border-radius:8px; border:1px solid var(--line); background:#143a24; transition:opacity .22s, filter .22s;}   /* ⚔️ 게스트 캔버스도 같은 규칙 (제보: 화면 크기 동일) */
 /* ── FM식 경기 풀스크린 — 경기 중에는 메인 메뉴·상단 바를 감추고 경기창이 화면을 채운다 ── */
 /* 경기 중에도 메인 메뉴·날짜 바 모두 표시 (사용자 요청) — matchFS는 여백·레이아웃 조정만 담당 */
 body.matchFS #main{max-width:none; padding:8px 16px;}
@@ -249,7 +249,7 @@ body.matchFS .fmPitchPane{max-width:none;}
 .lvDrop h3{margin-top:0;}
 .lvDrop .lvClose{float:right; margin-left:8px;}
 /* TEXT_MODE — 하이라이트가 없는 시간에는 캔버스를 흐리게 낮춰 "지금은 시간만 흐르는 중"임을 보여준다 */
-#pitch2d.dim{opacity:.4; filter:saturate(.45);}
+#pitch2d.dim,#pvpCv.dim{opacity:.4; filter:saturate(.45);}
 .pitchMode{float:right; font-size:11px; letter-spacing:.6px; color:var(--muted); font-weight:400;}
 .pitchMode.on{color:#f85149; font-weight:700;}
 /* 코멘터리 강조 — 골·선방 같은 중요한 순간에 CommentaryManager가 동적으로 붙인다 */
@@ -60383,10 +60383,8 @@ function pvpDrawWatch(){
   fs.ball.z=bJump?(A1.ball.z||0):lerpA(A0.ball.z||0, A1.ball.z||0);   // 공중볼 궤적도 매끈하게
   fs.ball.ownerId = A1.own ? (A1.own.side+String(A1.own.no)) : null;
   try{ drawSimWatch(cv, fs); }catch(e){}
-  /* 하이라이트 사이(빨리 감기 중)에는 호스트처럼 화면을 어둡게 — 장면이 시작되면 밝아진다 */
-  if(!A1.hl){
-    try{ const ctx=cv.getContext("2d"); ctx.fillStyle="rgba(6,10,14,0.55)"; ctx.fillRect(0,0,cv.width,cv.height); }catch(e){}
-  }
+  /* 하이라이트 사이(빨리 감기 중) 디밍 — 호스트와 같은 CSS(.dim: 투명도+채도)로 (제보: 화면 동일화) */
+  try{ if(cv.classList && cv.classList.toggle) cv.classList.toggle("dim", !A1.hl); }catch(e){}
 }
 /* 게스트 전광판 — 호스트 스코어버그와 같은 문법 (팀 필 + 스코어 + 시계 + HIGHLIGHT) */
 function pvpScoreHtml(){
@@ -60658,7 +60656,7 @@ function pvpView(){
         <span id="pvpMode" class="pitchMode" style="margin-left:auto${sN.hl?";color:#f85149":""}">${sN.hl?"● HIGHLIGHT":"○ 경기 진행 중"}</span>
       </div>
       <div class="pitchWrap">
-        <canvas id="pvpCv" width="960" height="630"></canvas>
+        <canvas id="pvpCv" class="dim" width="960" height="630"></canvas>
       </div>
       <div id="pvpCap" class="pitchCaption">${(W.cap&&W.cap.x)||"📡 중계 연결됨 — 해설이 곧 시작됩니다"}</div>
       <div class="small" style="text-align:left; margin-top:6px; color:var(--sub)">2D 매치엔진 2.0 by 청백적시메오네 — ⚔️ 원격 관전 (원정)</div>
