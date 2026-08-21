@@ -18272,6 +18272,14 @@ function showGoalPanel(side, name, minute, sub, cancelled, pos, slot){
   el.classList.remove("hidden");
   if(goalPanelTimer) clearTimeout(goalPanelTimer);
   goalPanelTimer=setTimeout(hideGoalPanel, cancelled?5200:6200);
+  /* ⚔️ 제보(게스트 득점 팝업) — 호스트가 패널을 띄우는 「공개 시점」에 그대로 중계한다.
+     읽히는 색(readableTeamColor)까지 계산해 보내 게스트도 같은 팝업을 띄운다. */
+  try{
+    if(liveM && liveM.opts && liveM.opts.pvp && typeof PVP!=="undefined" && PVP && PVP.role==="host")
+      pvpSend({t:"gp", off:cancelled?1:0, nm:String(name||"득점").slice(0,14), min:String(minute||""),
+               sub:String(sub||"").slice(0,40), pos:pos||"", slot:slot||"",
+               col:cancelled?"#f85149":readableTeamColor(team), tm:String(team.short||"").slice(0,18)});
+  }catch(e){}
 }
 /* 어두운 배경 위에서 읽히는 구단 색 — 대표색이 너무 어두우면 보조색·기본색으로 대체한다 */
 function colorLum(hex){
@@ -60245,6 +60253,7 @@ function pvpOnMsg(raw){
   if(m.t==="st" && PVP.role==="guest"){ try{ if(PVP.watch){ PVP.watch.st=m.st;
     const el=document.getElementById("pvpStats"); if(el) el.innerHTML=pvpStatsHtml(); } }catch(e){} return; }
   if(m.t==="chat"){ pvpChatPush("opp", pvpClean(m.x,120)); return; }
+  if(m.t==="gp" && PVP.role==="guest"){ pvpShowGoal(m); return; }
   if(m.t==="away"){ PVP.awayOpp=!!m.on; try{ pvpAwaySync(); }catch(e){} return; }
   if(m.t==="ht" && PVP.role==="guest"){ PVP._htWait=true; PVP.htMe=false; PVP.htOpp=false; try{ pvpHtOverlaySync(); }catch(e){} return; }
   if(m.t==="htr"){ PVP.htOpp=true;
@@ -60389,16 +60398,26 @@ function pvpGuestEv(m){
   try{ const sc=document.getElementById("pvpScoreN"); if(sc) sc.textContent=(W.hg||0)+" : "+(W.ag||0); }catch(e){}
 }
 function pvpStatsHtml(){
+  /* ⚠ 제보 — 「게이지바도 표시 안 되고 그냥 숫자만」. 호스트 통계와 같은 statbar 문법으로. */
   const W=PVP&&PVP.watch; const st=(W&&W.st)||null; const i=(W&&W.info)||{};
   if(!st) return `<p class="small" style="opacity:.6">집계 중…</p>`;
-  const row=(l,a,b)=>`<tr><td style="text-align:right;width:34%"><b>${a}</b></td><td class="small" style="text-align:center;opacity:.7">${l}</td><td style="width:34%"><b>${b}</b></td></tr>`;
+  const _hC=i.hc||"#2ea8ff";
+  const _aC=(typeof awayDiscCol==="function")?awayDiscCol(_hC, i.ac||"#f85149"):(i.ac||"#f85149");
+  const _hT=(typeof uiInk==="function")?uiInk(_hC):_hC, _aT=(typeof uiInk==="function")?uiInk(_aC):_aC;
   const pTot=(st.hP||0)+(st.aP||0);
-  const pp=pTot>0?Math.round(st.hP/pTot*100):50;
-  return `<div class="small" style="display:flex;justify-content:space-between;opacity:.8;margin-bottom:4px"><span>${i.hs||"홈"}</span><span>${i.as||"원정"}</span></div>
-  <table style="width:100%">${row("점유율", pp+"%", (100-pp)+"%")}
-    ${row("슈팅", st.hS, st.aS)}${row("유효슈팅", st.hT, st.aT)}
-    ${row("코너킥", st.hC, st.aC)}${row("파울", st.hF, st.aF)}
-    ${row("경고", st.hY, st.aY)}${row("퇴장", st.hR, st.aR)}</table>`;
+  const poss=pTot>40?clamp(Math.round(st.hP/pTot*100),12,88):50;
+  const bar=(l,hv,av)=>{const tot=hv+av||1; return `<div class="statbar">`
+    +`<span style="width:26px;text-align:right;color:${_hT};font-weight:800">${hv}</span>`
+    +`<div class="bg"><div class="fh" style="width:${hv/tot*100}%;background:${_hC}"></div>`
+    +`<div class="fa" style="width:${av/tot*100}%;background:${_aC}"></div></div>`
+    +`<span style="width:26px;color:${_aT};font-weight:800">${av}</span>`
+    +`<span style="width:52px" class="small">${l}</span></div>`;};
+  const _lg=`<div class="statLg">`
+    +`<span><i style="background:${_hC}"></i><b style="color:${_hT}">${i.hs||"홈"}</b> <span class="small">홈</span></span>`
+    +`<span class="small" style="opacity:.6">vs</span>`
+    +`<span><i style="background:${_aC}"></i><b style="color:${_aT}">${i.as||"원정"}</b> <span class="small">원정</span></span></div>`;
+  return _lg + bar("점유율",poss,100-poss)+bar("슈팅",st.hS||0,st.aS||0)+bar("유효슈팅",st.hT||0,st.aT||0)
+    + bar("코너킥",st.hC||0,st.aC||0)+bar("파울",st.hF||0,st.aF||0)+bar("경고",st.hY||0,st.aY||0)+bar("퇴장",st.hR||0,st.aR||0);
 }
 function pvpScoreTxt(){
   const W=PVP&&PVP.watch; if(!W) return "";
@@ -60508,6 +60527,29 @@ function pvpDrawWatch(){
   try{ if(cv.classList && cv.classList.toggle) cv.classList.toggle("dim", !!W._ffHeld || !A1.hl); }catch(e){}
 }
 /* 게스트 전광판 — 호스트 스코어버그와 같은 문법 (팀 필 + 스코어 + 시계 + HIGHLIGHT) */
+let pvpGoalT=null;
+function pvpShowGoal(m){
+  try{
+    const el=document.getElementById("pvpGoalOv"); if(!el) return;
+    const posTag=(m.slot||m.pos)?`<span class="gpPos pos-${pvpClean(m.pos,3)||"MF"}">${pvpClean(m.slot||m.pos,4)}</span>`:"";
+    const nm=pvpClean(m.nm,14)||"득점", min=pvpClean(m.min,8), sub=pvpClean(m.sub,40), tm=pvpClean(m.tm,18);
+    el.style.setProperty("--gpCol", /^#[0-9a-fA-F]{3,8}$/.test(m.col||"")?m.col:"#2ea8ff");
+    el.innerHTML = m.off
+      ? `<div class="gpBox gpOff">
+           <div class="gpTag">NO GOAL</div>
+           <div class="gpName">${posTag}<span class="gpStrike">${nm}</span></div>
+           <div class="gpMeta"><b>${min}'</b> · 🚩 오프사이드로 <b style="color:#ff7b72">득점 취소</b></div>
+         </div>`
+      : `<div class="gpBox">
+           <div class="gpTag">GOAL!</div>
+           <div class="gpName">${posTag}${nm}</div>
+           <div class="gpMeta"><b>${min}'</b> · ${tm}${sub?` <span class="gpSub">${sub}</span>`:""}</div>
+         </div>`;
+    el.classList.remove("hidden");
+    if(pvpGoalT) clearTimeout(pvpGoalT);
+    pvpGoalT=setTimeout(()=>{ try{ el.classList.add("hidden"); }catch(e){} }, m.off?5200:6200);
+  }catch(e){}
+}
 function pvpScoreHtml(){
   const W=PVP&&PVP.watch; if(!W) return "";
   const i=W.info||{}; const s=W.snap||{};
@@ -60880,6 +60922,7 @@ function pvpView(){
       </div>
       <div class="pitchWrap">
         <canvas id="pvpCv" class="dim" width="960" height="630" style="width:100%;height:auto;display:block"></canvas>
+        <div id="pvpGoalOv" class="goalPanel hidden"></div>
       </div>
       <div id="pvpCap" class="pitchCaption">${(W.cap&&W.cap.x)||"📡 중계 연결됨 — 해설이 곧 시작됩니다"}</div>
       <div class="small" style="text-align:left; margin-top:6px; color:var(--sub)">2D 매치엔진 2.0 by 청백적시메오네 — ⚔️ 원격 관전 (원정)</div>
